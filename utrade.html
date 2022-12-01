@@ -1,0 +1,537 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+</head>
+<body>
+    <input id="url" type="text" value="ws://10.238.227.44:8080?token=" /> <button id="connect">Connect</button> <button id="dis">Disconnect</button> <button id="clear">clear</button>
+    <br />
+	<br />
+     <input id="key" type="text" value="c447bfa2-d80c-49c8-a827-fab74138900b" />
+    <br />
+	<br />
+    <input id="type" type="text" value="top,news,stock,auction,index,status,ticker" /> <span id='key'><span>
+    <br />
+    <br />
+    <input id="input1" type="text" value="stk:2099" /> <button id="send1">Send</button>
+    <br />
+    <br />
+    <input id="input2" type="text" value="tik:2099" /> <button id="send2">Send</button>
+    <br />
+    <br />
+    <input id="input3" type="text" value="bid:2099" /> <button id="send3">Send</button>
+    <br />
+    <br />
+    <p id="count"></p>
+    <p id="content"></p>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js" integrity="sha512-894YE6QWD5I59HgZOGReFYm4dnWc1Qt5NtvYSaNcOP+u1T9qYdvdihz0PPSiiqn/+/3e7Jo4EaG7TubfWGUrMQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <script src="binary.js"></script>
+    <script>
+        var count = 0;
+
+        var socket;
+
+        var sub = new Map();
+
+        AddSub('k', (msg) => {
+            var date = new Date();
+            var type = $("#type").val();
+            var input = $("#input").val();
+            //var msg = JSON.parse(e.data);
+            count++;
+            $('#count').html('msg : ' + count);
+            if (count % 100 == 0) {
+                $('#content').html('');
+            }
+            $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);
+        });
+
+        $('#clear').click(function () {
+            $('#content').html('');
+        });
+
+        $('#send1').click(function () {
+
+            socket.send($('#input1').val())
+        });
+
+        $('#send2').click(function () {
+
+            socket.send($('#input2').val())
+        });
+
+        $('#send3').click(function () {
+
+            socket.send($('#input3').val())
+        });
+
+        $('#connect').click(function () {
+            $('#count').html('');
+            $('#content').html('');
+
+            socket = new WebSocket($('#url').val() + $('#key').val());
+            socket.binaryType = "arraybuffer";
+
+            socket.onopen = function (e) {
+                $('#content').append("connected<br\>");
+            };
+            socket.onmessage = function (e) {
+                var msg;
+
+                if (e.data instanceof ArrayBuffer) {
+                    BinaryToJson(e.data);
+                }
+                else {
+                    msg = JSON.parse(e.data);
+                }
+
+                for (const x of sub.entries()) {
+                    x[1](msg);
+                }
+
+            };
+
+            socket.onerror = function (error) {
+                $('#content').append(`[error] ${error}`);
+            };
+
+            socket.onclose = function (event) {
+                if (event.wasClean) {
+                    $('#content').append(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                } else {
+                    $('#content').append('[close] Connection died');
+                }
+            };
+
+            $('#dis').click(function () {
+                socket.close();
+            });
+        });
+
+        function AddSub(key, handle) {
+            sub.set(key, handle);
+
+        }
+
+        function RemoveSub(key) {
+            sub.delete(key);
+        }
+
+        function BinaryToJson(buffer) {
+            let date = new Date();
+            let dv = new DataView(buffer)
+            let index = 0;
+            let msg;
+            let size = 0;
+            while (dv.byteLength > index) {
+                let type = String.fromCharCode(dv.getUint8(index));
+                switch (type) {
+                    case 't':
+                        msg = getTickerFromBuffer(dv, index);
+                        $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);
+                        index += 74;
+                        break;
+                    case 'T':
+                        size = dv.getUint16(index + 1, true);
+                        if (size != 0) {
+                            msg = getTickerArrayFromBuffer(dv, index, size);
+                            $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);
+                            index += 3 + size * 74;
+                        }
+                        else {
+                            msg = { type: 'T', data: [] };
+                            $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);
+                            index += 3;
+                        }
+                        break;
+                    case 'b':
+                        size = dv.getInt8(index + 7);
+                        msg = getBidofferFromBuffer(dv, index, size);
+                         $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                        index += size * 10 + 8;
+                        break;
+                    case 's':
+                        msg = getStatisticFromBuffer(dv, index);
+                         $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                        index += 52;
+                        break;
+                    case 'v':
+                        msg = getVolumeFromBuffer(dv, index);
+                         $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                        index += 22;
+                        break;
+                    case 'i':
+                        msg = getIndexFromBinary(dv, index);
+                         $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                        index += 43;
+                        break;
+                    case 'a':
+                        msg = getAuctionFromBinary(dv, index);
+                         $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                        index += 22;
+                        break;
+                    case 'A':
+                        msg = getAuctionArrayFromBinary(dv, index);
+                        $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                        index += 37;
+                        break;
+                    case 'V':
+                        size = dv.getInt8(index + 1);
+                        if (size != 0) {
+                            msg = getVolumeArrayFromBuffer(dv, index, size);
+                             $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                            index += 3 + size * 22;
+                        }
+                        else {
+                            msg = { type: 'V', data: [] };
+                             $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                            index += 3;
+                        }
+
+                        break;
+                    case 'm':
+                        msg = getStatusFromBuffer(dv, index);
+                         $('#content').append(`${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${date.getMilliseconds()} : ${JSON.stringify(msg)} <br\><br\>`);;
+                        index += 7;
+                        break;
+                    default:
+                }
+            }
+        }
+
+        function convertTime(num) {
+
+            //let time;
+            let hour = Math.floor((num / 3600));
+            let minute = Math.floor((num - (hour * 3600)) / 60);
+            let second = num - (hour * 3600) - (minute * 60);
+
+            hour += 9;
+            return (hour > 9 ? hour : ('0' + hour)) + ':' + (minute > 9 ? minute : ('0' + minute)) + ':' + (second > 9 ? second : ('0' + second));
+        }
+
+        function getTickerFromBuffer(dataView, index) {
+
+            let res;
+
+            let isBuy = String.fromCharCode(dataView.getInt8(index + 1));
+            let orderBookId = dataView.getInt32(index + 2, true);
+            let timeOfEvent = convertTime(dataView.getUint16(index + 6, true));
+            let price = dataView.getInt32(index + 8, true) / 100;
+            //let volume = dataView.getInt32(12, true);
+            let volume = dataView.getUint32(index + 12, true);
+            let change = dataView.getInt32(index + 16, true) / 100;
+            let pChange = dataView.getInt32(index + 20, true) / 100;
+            let high = dataView.getInt32(index + 24, true) / 100;
+            let avg = dataView.getInt32(index + 28, true) / 100;
+            let low = dataView.getInt32(index + 32, true) / 100;
+            let deal = dataView.getUint16(index + 36, true);
+            let sumBuyVolume = dataView.getUint32(index + 38, true);
+            let sumSellVolume = dataView.getUint32(index + 42, true);
+            let sumVolume = dataView.getUint32(index + 46, true);
+            let sumBuyValue = Number.parseFloat(dataView.getBigInt64(index + 50, true));
+            let sumSellValue = Number.parseFloat(dataView.getBigInt64(index + 58, true));
+            let sumValue = Number.parseFloat(dataView.getBigInt64(index + 66, true));
+            
+
+            res = {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                isBuy: isBuy,
+                orderBookId: orderBookId,
+                timeOfEvent: timeOfEvent,
+                price: price,
+                volume: volume,
+                change: change,
+                percentChange: pChange,
+                high: high,
+                avg: avg,
+                low: low,
+                deals: deal,
+                sumBuyVolume: sumBuyVolume,
+                sumSellVolume: sumSellVolume,
+                sumVolume: sumVolume,
+                sumBuyValue: sumBuyValue,
+                sumSellValue: sumSellValue,
+                sumValue: sumValue
+            }
+
+            return res;
+        }
+
+        function getTickerArrayFromBuffer(dataView, index, size) {
+
+            let data = [size];
+            let getByte = 3;
+            let type = String.fromCharCode(dataView.getInt8(index));
+
+            for (let i = 0; i < size; i++) {
+                data[i] = getTickerFromBuffer(dataView, index + getByte);
+                getByte += 74;
+            }
+
+            return {
+                type: type,
+                data: data
+            };
+        }
+
+        function getBidofferFromBuffer(dataView, index, size) {
+            let res;
+
+            let orderBookId = dataView.getInt32(index + 1, true);
+
+            let detail  = [size];
+            let byteSet = 8;
+            let price = 0;
+            let volume = 0;
+            let timeOfEvent = '';
+            //let length = (dataView.byteLength - byteSet) / 10;
+            for (let i = 0; i < size; i++) {
+                price = dataView.getInt32(index + byteSet, true) / 100;
+                byteSet += 4;
+                volume = dataView.getUint32(index + byteSet, true);
+                //volume = dataView.getInt32(byteSet, true);
+                byteSet += 4;
+                timeOfEvent = convertTime(dataView.getUint16(index + byteSet, true));
+                byteSet += 2;
+                detail[i] = { price: price, volume: volume, timeOfEvent: timeOfEvent };
+            }
+
+            while (detail.length > 5) {
+                detail = clearOverBidOffer(detail);
+            }
+
+            res = {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                orderBookId: orderBookId,
+                isBid: dataView.getInt8(index + 5) == 1,
+                isClear: dataView.getInt8(index + 6) == 1,
+                detail: detail
+            }
+
+            return res;
+        }
+
+        function clearOverBidOffer(bidOffer) {
+            //check bidoffer legnth > 5
+            while (bidOffer.length > 5) {
+                var date = "9999";
+
+                for (let b of bidOffer) {
+                    if (b.timeOfEvent < date) {
+                        date = b.timeOfEvent;
+                    }
+                }
+
+                bidOffer = bidOffer.filter(a => a.timeOfEvent != date);
+            }
+
+            return bidOffer;
+        }
+
+        function getVolumeFromBuffer(dataView, index) {
+            let res;
+
+            //let deal = dataView.getUint16(20, true);
+
+            res = {
+                type: dataView.fromCharCode(dataView.getInt8(index)),
+                isBuy: dataView.fromCharCode(dataView.getInt8(index + 1)),
+                orderBookId: dataView.getInt32(index + 2, true),
+                timeOfEvent: convertTime(dataView.getUint16(index + 6, true)),
+                price: dataView.getInt32(index + 8, true) / 100,
+                volume: dataView.getInt32(index + 12, true),
+                change: dataView.getInt32(index + 16, true) / 100,
+                deal: dataView.getInt16(index + 20, true)
+            }
+
+            return res;
+        }
+
+        function getVolumeArrayFromBuffer(dataView, index, size) {
+
+            let data = [size];
+            //let length = (dataView.byteLength - 3) / 22;
+            let getByte = 3;
+
+            //let deal = dataView.getUint16(20, true);
+
+            for (let i = 0; i < size; i++) {
+
+                getByte += 1;
+                let isBuy = String.fromCharCode(dataView.getInt8(index + getByte));
+                getByte += 1;
+                let orderBookId = dataView.getInt32(index + getByte, true);
+                getByte += 4;
+                let time = convertTime(dataView.getUint16(index + getByte, true));
+                getByte += 2;
+                let price = dataView.getInt32(index + getByte, true) / 100;
+                getByte += 4;
+                let volume = dataView.getInt32(index + getByte, true);
+                getByte += 4;
+                let change = dataView.getInt32(index + getByte, true) / 100;
+                getByte += 4;
+                let deal = dataView.getInt16(index + getByte, true);
+                getByte += 2;
+
+                data[i] = {
+                    type: String.fromCharCode(dataView.getInt8(index)),
+                    isBuy: isBuy,
+                    orderBookId: orderBookId,
+                    timeOfEvent: time,
+                    price: price,
+                    volume: volume,
+                    change: change,
+                    deal: deal
+                }
+            }
+
+            let res = {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                data: data
+            }
+
+            return res;
+
+        }
+
+        function getStatusFromBuffer(dataView, index) {
+            let res;
+
+            //let orderBookCount = dataView.getUint8(6);
+            let numStatus = dataView.getInt32(index + 3, true);
+
+            let lastStatus = '';
+            switch (numStatus) {
+                case 1:
+                    lastStatus = 'Startup';
+                    break;
+                case 2:
+                    lastStatus = 'PreOpen1';
+                    break;
+                case 3:
+                    lastStatus = 'Open1';
+                    break;
+                case 4:
+                    lastStatus = 'Intermission';
+                    break;
+                case 5:
+                    lastStatus = 'PreOpen2';
+                    break;
+                case 6:
+                    lastStatus = 'Open2';
+                    break;
+                case 7:
+                    lastStatus = 'PreClose';
+                    break;
+                case 8:
+                    lastStatus = 'OffHour';
+                    break;
+                case 9:
+                    lastStatus = 'Closed';
+                    break;
+                case 10:
+                    lastStatus = 'Closed2';
+                    break;
+                case 11:
+                    lastStatus = 'AfterMarket';
+                    break;
+                case 12:
+                    lastStatus = 'PreOpenTemp';
+                    break;
+                default:
+            }
+
+            res = {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                timeOfEvent: convertTime(dataView.getUint16(index + 1, true)),
+                lastStatus: lastStatus,
+                haltType: dataView.getUint8(index + 4),
+                haltReason: dataView.getUint8(index + 5),
+                orderBooks: []
+            }
+
+            return res;
+        }
+
+        function getStatisticFromBuffer(dataView, index) {
+            let res;
+
+            res = {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                market: String.fromCharCode(dataView.getInt8(index + 1)),
+                totalTrades: dataView.getInt32(index + 2, true),
+                totalVolumn: Number.parseFloat(dataView.getBigInt64(index + 6, true)),
+                totalValue: Number.parseFloat(dataView.getBigInt64(index + 14, true)),
+                upVolume: Number.parseFloat(dataView.getBigInt64(index + 22, true)),
+                downVolume: Number.parseFloat(dataView.getBigInt64(index + 30, true)),
+                noChangeVolume: Number.parseFloat(dataView.getBigInt64(index + 38, true)),
+                upShare: dataView.getInt16(index + 46, true),
+                downShare: dataView.getInt16(index + 48, true),
+                noChangeShare: dataView.getInt16(index + 50, true)
+            }
+
+            return res;
+        }
+
+        function getIndexFromBinary(dataView, index) {
+            let res;
+
+            res = {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                orderBookId: dataView.getInt32(index + 1, true),
+                value: dataView.getInt32(index + 5, true) / 100,
+                prior: dataView.getInt32(index + 9, true) / 100,
+                high: dataView.getInt32(index + 13, true) / 100,
+                low: dataView.getInt32(index + 17, true) / 100,
+                change: dataView.getInt32(index + 21, true) / 100,
+                percentage: dataView.getInt16(index + 25, true) / 100,
+                totalTurnover: Number.parseFloat(dataView.getBigInt64(index + 27, true)),
+                totalSharesTraded: Number.parseFloat(dataView.getBigInt64(index + 35, true)),
+            }
+
+            return res;
+        }
+
+        function getAuctionFromBinary(dataView, index) {
+            //let res: auctions;
+            //let isFinal = dataView.getInt8(13) == 1;
+            //let isFinal = dataView.getInt8(13);
+            //let bFinal: boolean = false;
+            //if (isFinal == 1) {
+            //    bFinal = true;
+            //}
+
+            return {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                orderBookId: dataView.getInt32(index + 1, true),
+                price: dataView.getInt32(index + 5, true) / 100,
+                volume: dataView.getInt32(index + 9, true),
+                //isFinal: bFinal,
+                isFinal: dataView.getInt8(index + 13) == 1,
+                preOpenMarketValue: Number.parseFloat(dataView.getBigInt64(index + 14, true))
+            }
+
+        }
+
+        function getAuctionArrayFromBinary(dataView, index) {
+
+            return {
+                type: String.fromCharCode(dataView.getInt8(index)),
+                orderBookId: dataView.getInt32(index + 1, true),
+                price: dataView.getInt32(index + 5, true) / 100,
+                volume: dataView.getInt32(index + 9, true),
+                open1: dataView.getInt32(index + 13, true) / 100,
+                open1Volume: dataView.getInt32(index + 17, true),
+                open2: dataView.getInt32(index + 21, true) / 100,
+                open2Volume: dataView.getInt32(index + 25, true),
+                close: dataView.getInt32(index + 29, true) / 100,
+                closeVolume: dataView.getInt32(index + 33, true),
+            }
+
+        }
+    </script>
+</body>
+</html>
